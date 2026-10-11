@@ -1,0 +1,745 @@
+/* ============================================================
+   Kevin Premalal — script.js
+   Hash-based SPA router + all interactive features.
+   ============================================================ */
+"use strict";
+
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const app = $("#app");
+
+let LANG = localStorage.getItem("kp-lang") || "en";
+const t = k => (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+const OTHER_LANG = () => LANG === "en" ? "si" : "en";
+
+/* ---------- I18N ---------- */
+function applyI18n(){
+  $$("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  const fc = $("#year"); if (fc) fc.textContent = new Date().getFullYear();
+  document.documentElement.lang = LANG === "si" ? "si" : "en";
+}
+
+/* ---------- ROUTER ---------- */
+const ROUTES = {
+  "home": vHome, "past-papers": vPastPapers, "ict-knowledge": vKnowledge,
+  "lesson": vLesson, "computer-parts": vParts, "maths-calculator": vMaths,
+  "daily-quizzes": vQuizzes, "study-notes": vNotes, "about": vAbout,
+  "contact": vContact, "privacy": vPrivacy, "search": vSearch,
+};
+
+function routeInfo(){
+  const h = location.hash.replace(/^#\/?/, "") || "home";
+  const [name, ...rest] = h.split("/");
+  return { name: ROUTES[name] ? name : "home", param: decodeURIComponent(rest.join("/")) };
+}
+
+function render(){
+  const { name, param } = routeInfo();
+  $$(".main-nav a, .mobile-menu a").forEach(a =>
+    a.classList.toggle("active", a.dataset.route === name));
+  $("#mobileMenu").classList.remove("open");
+  $("#navBurger").classList.remove("open");
+  app.innerHTML = `<div class="fade-in">${ROUTES[name](param)}</div>`;
+  BINDERS[name] && BINDERS[name](param);
+  window.scrollTo({ top: 0 });
+}
+
+window.addEventListener("hashchange", render);
+
+/* ---------- Shared builders ---------- */
+function pageHero(kicker, title, sub){
+  return `<section class="page-hero"><div class="container">
+    <div class="breadcrumb"><a href="#/home">${t("navHome")}</a> / ${esc(kicker)}</div>
+    <h1>${esc(title)}</h1><p>${esc(sub)}</p></div></section>`;
+}
+
+function paperItemHTML(p){
+  const examBadge = p.exam === "OL" ? `<span class="badge ol">${t("examOL")}</span>` : `<span class="badge al">${t("examAL")}</span>`;
+  const pdfPart = p.pdf
+    ? `<a class="btn cyan sm" href="${esc(p.pdf)}" download>⬇ ${t("downloadPDF")}</a>
+       ${p.ms ? `<a class="btn ghost sm" href="${esc(p.ms)}" download>${t("markingScheme")}</a>` : ""}`
+    : `<button class="btn sm" disabled title="${esc(t("placeholderNote"))}">${esc(t("notAvailable"))}</button>`;
+  return `<div class="paper-item">
+    <div class="pi-main">
+      <span class="pi-title">${esc(p.title)}</span>
+      <span class="pi-meta">${esc(p.subject)} • ${p.year}</span>
+      <div class="pi-badges">${examBadge}<span class="badge ${p.type==="MCQ"?"ms":"ms"}">${p.type}</span>
+        ${p.pdf ? `<span class="badge available">PDF</span>` : `<span class="badge placeholder">${LANG==="si"?"නියැදිය":"Sample"}</span>`}</div>
+      ${!p.pdf ? `<span class="pi-meta" style="margin-top:4px">⚠️ ${esc(t("placeholderNote"))}</span>` : ""}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${pdfPart}</div>
+  </div>`;
+}
+
+function examBadgeHTML(p){
+  return p.exam === "OL" ? `<span class="badge ol">${t("examOL")}</span>` : `<span class="badge al">${t("examAL")}</span>`;
+}
+
+/* ---------- HOME ---------- */
+function vHome(){
+  const featured = ICT_LESSONS.filter(l => l.featured);
+  const dq = dailyQuestion();
+  return `
+  <section class="hero"><div class="container">
+    <span class="hero-badge">${esc(t("heroBadge"))}</span>
+    <h1>${esc(t("heroTitleA"))} <span class="accent">${esc(t("heroTitleB"))}</span></h1>
+    <p class="lead">${esc(t("heroLead"))}</p>
+    <div class="search-wrap">
+      <input id="heroSearch" type="text" placeholder="${esc(t("searchPlaceholder"))}" autocomplete="off" aria-label="Search">
+      <button id="heroSearchBtn" aria-label="${esc(t("searchBtn"))}">🔍</button>
+      <div class="search-suggest" id="searchSuggest"></div>
+    </div>
+  </div></section>
+
+  <section class="section"><div class="container">
+    <div class="section-head"><span class="kicker">Kevin Premalal</span>
+      <h2>${esc(t("quickTitle"))}</h2><p>${esc(t("quickSub"))}</p></div>
+    <div class="cards-grid">
+      ${QUICK_CARDS.map(c => `
+        <a class="card${LANG==="si"?" si":""}" href="#/${c.route}">
+          <div class="card-icon">${c.icon}</div>
+          <h3>${esc(LANG==="si" ? c.si : c.title)}</h3>
+          <p>${esc(c.desc)}</p>
+          <span class="card-link">${esc(t("viewAll"))} →</span>
+        </a>`).join("")}
+    </div>
+  </div></section>
+
+  <section class="section tinted"><div class="container">
+    <div class="section-head"><span class="kicker">ICT</span>
+      <h2>${esc(t("featTitle"))}</h2><p>${esc(t("featSub"))}</p></div>
+    <div class="topic-grid">
+      ${featured.map(l => `
+        <a class="topic-card" href="#/lesson/${l.id}">
+          <span class="t-num">LESSON ${l.num} • ${esc(l.level)}</span>
+          <h3>${esc(LANG==="si" ? l.siTitle : l.title)}</h3>
+          <span class="t-si">${esc(LANG==="si" ? l.title : l.siTitle)}</span>
+        </a>`).join("")}
+    </div>
+    <div style="text-align:center;margin-top:26px"><a class="btn ghost" href="#/ict-knowledge">${esc(t("viewAll"))} →</a></div>
+  </div></section>
+
+  <section class="section"><div class="container">
+    <div class="section-head"><span class="kicker">Exams</span>
+      <h2>${esc(t("latestTitle"))}</h2><p>${esc(t("latestSub"))}</p></div>
+    ${PAST_PAPERS.slice(0,3).map(paperItemHTML).join("")}
+    <div style="text-align:center;margin-top:22px"><a class="btn ghost" href="#/past-papers">${esc(t("viewAll"))} →</a></div>
+  </div></section>
+
+  <section class="section tinted"><div class="container">
+    <div class="section-head"><span class="kicker">Daily</span>
+      <h2>${esc(t("dailyTitle"))}</h2><p>${esc(t("dailySub"))}</p></div>
+    <div class="daily-box" style="max-width:760px;margin:0 auto">
+      <h3>🗓️ ${new Date().toLocaleDateString(LANG==="si"?"si-LK":"en-GB",{year:"numeric",month:"long",day:"numeric"})}</h3>
+      <div class="quiz-q" style="color:#fff">${esc(dq.q)}</div>
+      <div class="quiz-opts" id="dailyOpts">
+        ${dq.opts.map((o,i)=>`<button class="quiz-opt" data-i="${i}"><span class="opt-letter">${"ABCD"[i]}</span>${esc(o)}</button>`).join("")}
+      </div>
+      <div class="quiz-feedback" id="dailyFb"></div>
+      <p class="small" style="color:#9fc3e8;margin-top:14px">ℹ️ Questions are picked locally by date. A server-scheduled rotation & cross-device streaks need a backend (see README).</p>
+      <a class="btn cyan" style="margin-top:12px" href="#/daily-quizzes">${esc(t("startQuiz"))} →</a>
+    </div>
+  </div></section>
+
+  <section class="section"><div class="container">
+    <div class="section-head"><span class="kicker">Tips</span>
+      <h2>${esc(t("tipsTitle"))}</h2><p>${esc(t("tipsSub"))}</p></div>
+    <div class="tips-grid">
+      ${LEARNING_TIPS.slice(0,3).map(tip => `<div class="tip"><h4>${esc(LANG==="si"?tip.si:tip.title)}</h4><p>${esc(tip.body)}</p></div>`).join("")}
+    </div>
+  </div></section>`;
+}
+
+function dailyQuestion(){
+  const qs = QUIZ_CATEGORIES[0].questions;
+  const now = new Date();
+  const dayOfYear = Math.floor((now - new Date(now.getFullYear(),0,0)) / 86400000);
+  return qs[dayOfYear % qs.length];
+}
+
+/* ---------- PAST PAPERS ---------- */
+function vPastPapers(){
+  const years = [...new Set(PAST_PAPERS.map(p=>p.year))].sort((a,b)=>b-a);
+  const subs  = [...new Set(PAST_PAPERS.map(p=>p.subject))].sort();
+  return pageHero("Resources", t("navPapers"), "Browse G.C.E. O/L and A/L past papers by exam, subject, year and paper type. All downloads are free.") +
+  `<section class="section"><div class="container">
+    <div class="toolbar">
+      <div class="field"><label>${esc(t("allExams"))}</label>
+        <select id="fExam"><option value="">${esc(t("allExams"))}</option><option value="OL">${t("examOL")}</option><option value="AL">${t("examAL")}</option></select></div>
+      <div class="field"><label>${esc(t("allSubjects"))}</label>
+        <select id="fSub"><option value="">${esc(t("allSubjects"))}</option>${subs.map(s=>`<option>${esc(s)}</option>`).join("")}</select></div>
+      <div class="field"><label>${esc(t("allYears"))}</label>
+        <select id="fYear"><option value="">${esc(t("allYears"))}</option>${years.map(y=>`<option>${y}</option>`).join("")}</select></div>
+      <div class="field"><label>${esc(t("allTypes"))}</label>
+        <select id="fType"><option value="">${esc(t("allTypes"))}</option><option>MCQ</option><option>Essay</option></select></div>
+      <div class="field"><label>${LANG==="si"?"සෙවුම":"Text search"}</label>
+        <input type="text" id="fText" placeholder="e.g. ICT 2023"></div>
+    </div>
+    <p class="muted small" id="paperCount" style="margin-bottom:14px"></p>
+    <div id="paperList"></div>
+  </div></section>`;
+}
+
+function bindPastPapers(){
+  const upd = () => {
+    const ex=$("#fExam").value, sub=$("#fSub").value, yr=$("#fYear").value, ty=$("#fType").value,
+          tx=$("#fText").value.trim().toLowerCase();
+    const res = PAST_PAPERS.filter(p =>
+      (!ex||p.exam===ex)&&(!sub||p.subject===sub)&&(!yr||String(p.year)===yr)&&
+      (!ty||p.type===ty)&&(!tx||p.title.toLowerCase().includes(tx)));
+    $("#paperCount").textContent = `${res.length} ${t("filterResults")}`;
+    $("#paperList").innerHTML = res.length ? res.map(paperItemHTML).join("")
+      : `<div class="empty-state"><div class="big">🔍</div>${esc(t("noResults"))}</div>`;
+  };
+  ["fExam","fSub","fYear","fType"].forEach(id => $("#"+id).addEventListener("change", upd));
+  $("#fText").addEventListener("input", upd);
+  upd();
+}
+
+/* ---------- ICT KNOWLEDGE ---------- */
+function vKnowledge(){
+  return pageHero("ICT", t("navKnowledge"), "Twelve structured topics — from computer fundamentals to AI. Every lesson has key points in Sinhala and English plus a practice question.") +
+  `<section class="section"><div class="container">
+    <div class="topic-grid">
+      ${ICT_LESSONS.map(l => `
+        <a class="topic-card" href="#/lesson/${l.id}">
+          <span class="t-num">LESSON ${l.num} • ${esc(l.level)}</span>
+          <h3>${esc(LANG==="si"?l.siTitle:l.title)}</h3>
+          <span class="t-si">${esc(LANG==="si"?l.title:l.siTitle)}</span>
+        </a>`).join("")}
+    </div>
+  </div></section>`;
+}
+
+function vLesson(id){
+  const l = ICT_LESSONS.find(x => x.id === id);
+  if (!l) return `<section class="section"><div class="container"><div class="empty-state"><div class="big">😕</div>${esc(t("noResults"))}</div></div></section>`;
+  const pq = l.practice;
+  return `<section class="section"><div class="container"><div class="lesson-body">
+    <a class="back-link" href="#/ict-knowledge">← ${esc(t("navKnowledge"))}</a>
+    <span class="kicker" style="color:var(--cyan-dark)">LESSON ${l.num} • ${esc(l.level)}</span>
+    <h2>${esc(l.title)}</h2>
+    <p class="muted" style="margin-bottom:18px">${esc(l.siTitle)}</p>
+    <h3>${LANG==="si"?"හැඳින්වීම":"Overview"}</h3>
+    <p>${esc(l.overview)}</p>
+    <p class="muted" style="font-size:.92rem">${esc(l.siOverview)}</p>
+    <div class="keybox"><h4>🔑 ${LANG==="si"?"මූලික කරුණු":"Key Points"}</h4><ul>${l.keyPoints.map(k=>`<li>${esc(k)}</li>`).join("")}</ul></div>
+    <div class="keybox si"><h4>🔑 සිංහලෙන්</h4><ul>${l.siKeyPoints.map(k=>`<li>${esc(k)}</li>`).join("")}</ul></div>
+    <div class="example"><span class="ex-title">Example</span>${esc(l.example)}</div>
+    <div class="practice-q">
+      <h4 style="margin-bottom:4px">✍️ ${LANG==="si"?"අභ්‍යාස ප්‍රශ්නය":"Practice Question"}</h4>
+      <p class="muted small" style="margin-bottom:12px">${esc(pq.siQ)}</p>
+      <p style="font-weight:600;margin-bottom:12px">${esc(pq.q)}</p>
+      <div class="quiz-opts" id="pqOpts">
+        ${pq.opts.map((o,i)=>`<button class="quiz-opt" data-i="${i}"><span class="opt-letter">${"ABCD"[i]}</span>${esc(o)}</button>`).join("")}
+      </div>
+      <div class="quiz-feedback" id="pqFb"></div>
+    </div>
+  </div></div></section>`;
+}
+
+function bindLesson(id){
+  const l = ICT_LESSONS.find(x => x.id === id); if (!l) return;
+  $$("#pqOpts .quiz-opt").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.i, ok = i === l.practice.answer, fb = $("#pqFb");
+    $$("#pqOpts .quiz-opt").forEach(x => { x.disabled = true; if (+x.dataset.i === l.practice.answer) x.classList.add("correct"); });
+    if (!ok) b.classList.add("wrong");
+    fb.className = "quiz-feedback show " + (ok ? "ok" : "bad");
+    fb.textContent = (ok ? "✅ Correct! " : "❌ Not quite. ") + l.practice.explain;
+  }));
+}
+
+/* ---------- COMPUTER PARTS ---------- */
+function motherboardSVG(){
+  const lbl = (x,y,txt,small) => `<text x="${x}" y="${y}" class="${small?"svg-small":"svg-label"}">${txt}</text>`;
+  return `<svg viewBox="0 0 660 430" role="img" aria-label="Labeled computer diagram">
+    <rect x="8" y="8" width="644" height="414" rx="16" fill="#0e2a4e" stroke="#1e4a80" stroke-width="2"/>
+    <!-- Motherboard -->
+    <g class="part-hotspot" data-part="motherboard"><rect x="40" y="30" width="380" height="360" rx="10" fill="#123a66" stroke="#2a5a94" stroke-width="2"/>
+      ${lbl(60,55,"MOTHERBOARD / මවුබෝඩ්",false)}${lbl(60,70,"Main circuit board",true)}</g>
+    <!-- CPU -->
+    <g class="part-hotspot" data-part="cpu"><rect x="160" y="85" width="95" height="95" rx="8" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(170,130,"CPU",false)}${lbl(170,146,"Processor",true)}</g>
+    <!-- Cooling -->
+    <g class="part-hotspot" data-part="cooling"><circle cx="207" cy="132" r="58" fill="none" stroke="#3b78b5" stroke-width="2" stroke-dasharray="6 5"/>
+      ${lbl(150,205,"❄ Cooling fan + heat sink",true)}</g>
+    <!-- RAM -->
+    <g class="part-hotspot" data-part="ram"><rect x="300" y="60" width="100" height="28" rx="4" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      <rect x="300" y="96" width="100" height="28" rx="4" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(305,150,"RAM memory sticks",true)}</g>
+    <!-- Chipset -->
+    <g class="part-hotspot" data-part="chipsets"><rect x="150" y="230" width="130" height="55" rx="8" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(160,255,"NORTHBRIDGE /",false)}${lbl(160,272,"SOUTHBRIDGE chipset",false)}</g>
+    <!-- BIOS -->
+    <g class="part-hotspot" data-part="bios"><rect x="60" y="300" width="62" height="34" rx="5" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(60,292,"BIOS / UEFI chip",true)}</g>
+    <!-- Storage -->
+    <g class="part-hotspot" data-part="hdd-ssd"><rect x="290" y="230" width="105" height="60" rx="8" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(300,255,"HDD / SSD",false)}${lbl(300,272,"Storage drive",true)}</g>
+    <!-- GPU -->
+    <g class="part-hotspot" data-part="gpu"><rect x="60" y="352" width="330" height="26" rx="6" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(70,369,"GRAPHICS CARD (GPU) — expansion slot",true)}</g>
+    <!-- PSU -->
+    <g class="part-hotspot" data-part="psu"><rect x="452" y="30" width="180" height="85" rx="10" fill="#123a66" stroke="#2a5a94" stroke-width="2"/>
+      ${lbl(470,60,"POWER SUPPLY",false)}${lbl(470,76,"(PSU) — 230V AC → DC",true)}</g>
+    <!-- Ports -->
+    <g class="part-hotspot" data-part="ports"><rect x="452" y="130" width="180" height="40" rx="8" fill="#1d4e89" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(462,148,"PORTS: USB • HDMI",false)}${lbl(462,163,"Ethernet • Audio",true)}</g>
+    <!-- I/O devices -->
+    <g class="part-hotspot" data-part="io-devices"><rect x="470" y="200" width="150" height="95" rx="8" fill="#0c243f" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(492,240,"MONITOR",false)}${lbl(492,256,"(output)",true)}
+      <rect x="470" y="315" width="150" height="42" rx="8" fill="#0c243f" stroke="#3b78b5" stroke-width="2"/>
+      ${lbl(492,335,"KEYBOARD (input)",false)}${lbl(492,350,"MOUSE • etc.",true)}</g>
+  </svg>`;
+}
+
+function vParts(){
+  return pageHero("Hardware", t("navParts"), "Click any component on the diagram or in the list to learn what it does — then try its quiz question.") +
+  `<section class="section"><div class="container">
+    <div class="parts-layout">
+      <div class="diagram-box">${motherboardSVG()}</div>
+      <div class="parts-list">
+        ${COMPUTER_PARTS.map(p => `<button class="part-btn" data-part="${p.id}">${p.icon} ${esc(LANG==="si"?p.siName:p.name)} <small>${esc(LANG==="si"?p.name:p.siName)}</small></button>`).join("")}
+      </div>
+    </div>
+    <div class="part-detail" id="partDetail"></div>
+  </div></section>`;
+}
+
+function bindParts(){
+  const show = id => {
+    const p = COMPUTER_PARTS.find(x => x.id === id); if (!p) return;
+    $$(".part-btn").forEach(b => b.classList.toggle("active", b.dataset.part === id));
+    $$(".part-hotspot").forEach(h => h.classList.toggle("active", h.dataset.part === p.hotspot));
+    $("#partDetail").innerHTML = `
+      <h3>${p.icon} ${esc(p.name)} <span class="muted" style="font-weight:400;font-size:.9rem">(${esc(p.siName)})</span></h3>
+      <p class="pd-fn">${esc(p.function)}</p>
+      <p>${esc(p.desc)}</p>
+      <p class="muted" style="font-size:.92rem">${esc(p.siDesc)}</p>
+      <dl><dt>Examples</dt><dd>${esc(p.examples)}</dd></dl>
+      <div class="practice-q" style="margin-bottom:0">
+        <h4 style="margin-bottom:10px">🧠 ${LANG==="si"?"ප්‍රශ්නය":"Quick question"}</h4>
+        <p style="font-weight:600;margin-bottom:12px">${esc(p.quiz.q)}</p>
+        <div class="quiz-opts" id="partQOpts">${p.quiz.opts.map((o,i)=>`<button class="quiz-opt" data-i="${i}"><span class="opt-letter">${"ABCD"[i]}</span>${esc(o)}</button>`).join("")}</div>
+        <div class="quiz-feedback" id="partQFb"></div>
+      </div>`;
+    $$("#partQOpts .quiz-opt").forEach(b => b.addEventListener("click", () => {
+      const i = +b.dataset.i, ok = i === p.quiz.answer, fb = $("#partQFb");
+      $$("#partQOpts .quiz-opt").forEach(x => { x.disabled = true; if (+x.dataset.i === p.quiz.answer) x.classList.add("correct"); });
+      if (!ok) b.classList.add("wrong");
+      fb.className = "quiz-feedback show " + (ok ? "ok" : "bad");
+      fb.textContent = (ok ? "✅ Correct! " : "❌ Not quite. ") + p.quiz.explain;
+    }));
+  };
+  $$(".part-btn").forEach(b => b.addEventListener("click", () => show(b.dataset.part)));
+  $$(".part-hotspot").forEach(h => h.addEventListener("click", () => {
+    const p = COMPUTER_PARTS.find(x => x.hotspot === h.dataset.part); if (p) show(p.id);
+  }));
+  show("cpu");
+}
+
+/* ---------- MATHS CALCULATOR ---------- */
+const CALC_TOOLS = [
+  {id:"basic",    label:"Basic",      si:"මූලික"},
+  {id:"percent",  label:"Percentage", si:"ප්‍රතිශතය"},
+  {id:"fraction", label:"Fractions",  si:"භාග"},
+  {id:"ratio",    label:"Ratio",      si:"අනුපාතය"},
+  {id:"power",    label:"Powers & Roots", si:"ඝාත සහ මූල"},
+  {id:"average",  label:"Average",    si:"සාමාන්‍යය"},
+  {id:"base",     label:"Base Conversion", si:"පද්ධති පරිවර්තනය"},
+  {id:"binary",   label:"Binary Arithmetic", si:"ද්විමය ගණනය"},
+  {id:"logic",    label:"Logic Gates", si:"තර්ක ද්වාර"},
+];
+
+function vMaths(){
+  return pageHero("Numbers", t("navMaths"), "Step-by-step solutions with input validation. Perfect for O/L and A/L ICT number-system questions.") +
+  `<section class="section"><div class="container">
+    <div class="calc-tabs">
+      ${CALC_TOOLS.map((c,i)=>`<button class="calc-tab${i===0?" active":""}" data-tool="${c.id}">${esc(LANG==="si"?c.si:c.label)}</button>`).join("")}
+    </div>
+    <div class="calc-panel" id="calcPanel"></div>
+  </div></section>`;
+}
+
+function bindMaths(){
+  const panels = {
+    basic: () => `
+      <h3 style="margin-bottom:16px">🧮 ${LANG==="si"?"මූලික ගණනය":"Basic Calculator"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>${LANG==="si"?"පළමු අගය":"First number"}</label><input type="number" id="a" step="any"></div>
+        <div class="field"><label>${LANG==="si"?"කර්මය":"Operation"}</label><select id="op"><option value="+">+</option><option value="-">−</option><option value="*">×</option><option value="/">÷</option></select></div>
+        <div class="field"><label>${LANG==="si"?"දෙවන අගය":"Second number"}</label><input type="number" id="b" step="any"></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"ගණනය කරන්න":"Calculate"}</button>
+      </div>${out()}`,
+    percent: () => `
+      <h3 style="margin-bottom:16px">％ ${LANG==="si"?"ප්‍රතිශතය":"Percentage"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>${LANG==="si"?"ප්‍රතිශතය":"Percentage (%)"}</label><input type="number" id="p" step="any"></div>
+        <div class="field"><label>${LANG==="si"?"වූයේ":"of value"}</label><input type="number" id="v" step="any"></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"ගණනය කරන්න":"Calculate"}</button>
+      </div>${out()}`,
+    fraction: () => `
+      <h3 style="margin-bottom:16px">➗ ${LANG==="si"?"භාග":"Fraction Addition"} (a/b + c/d)</h3>
+      <div class="calc-row">
+        <div class="field"><label>a</label><input type="number" id="a"></div>
+        <div class="field"><label>b</label><input type="number" id="b"></div>
+        <div class="field"><label>c</label><input type="number" id="c"></div>
+        <div class="field"><label>d</label><input type="number" id="d"></div>
+        <button class="btn cyan" id="go">a/b + c/d</button>
+      </div>${out()}`,
+    ratio: () => `
+      <h3 style="margin-bottom:16px">⚖ ${LANG==="si"?"අනුපාතය සරල කිරීම":"Simplify Ratio"} a : b</h3>
+      <div class="calc-row">
+        <div class="field"><label>a</label><input type="number" id="a"></div>
+        <div class="field"><label>b</label><input type="number" id="b"></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"සරල කරන්න":"Simplify"}</button>
+      </div>${out()}`,
+    power: () => `
+      <h3 style="margin-bottom:16px">🔢 ${LANG==="si"?"ඝාත සහ වර්ගමූල":"Powers & Square Roots"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>Base</label><input type="number" id="a" step="any"></div>
+        <div class="field"><label>Exponent</label><input type="number" id="b" step="any"></div>
+        <button class="btn cyan" id="goPow">a^b</button>
+        <div class="field"><label>√x</label><input type="number" id="c" step="any" min="0"></div>
+        <button class="btn cyan" id="goRoot">√</button>
+      </div>${out()}`,
+    average: () => `
+      <h3 style="margin-bottom:16px">📈 ${LANG==="si"?"සාමාන්‍යය":"Average (Mean)"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>${LANG==="si"?"අගයන් (කොමා වලින් වෙන් කරන්න)":"Values (comma separated)"}</label>
+        <input type="text" id="vals" placeholder="10, 20, 30, 40" style="min-width:240px"></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"ගණනය කරන්න":"Calculate"}</button>
+      </div>${out()}`,
+    base: () => `
+      <h3 style="margin-bottom:16px">🔁 ${LANG==="si"?"පද්ධති පරිවර්තනය":"Base Conversion"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>${LANG==="si"?"අගය":"Number"}</label><input type="text" id="num"></div>
+        <div class="field"><label>${LANG==="si"?"සිට":"From base"}</label><select id="fb"><option>2</option><option>8</option><option selected>10</option><option>16</option></select></div>
+        <div class="field"><label>${LANG==="si"?"දක්වා":"To base"}</label><select id="tb"><option>2</option><option>8</option><option>10</option><option selected>16</option></select></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"පරිවර්තනය":"Convert"}</button>
+      </div>${out()}`,
+    binary: () => `
+      <h3 style="margin-bottom:16px">➕ ${LANG==="si"?"ද්විමය ගණනය":"Binary Arithmetic"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>A (binary)</label><input type="text" id="a" placeholder="1011"></div>
+        <div class="field"><label>${LANG==="si"?"කර්මය":"Operation"}</label><select id="op"><option value="+">+</option><option value="-">−</option><option value="*">×</option></select></div>
+        <div class="field"><label>B (binary)</label><input type="text" id="b" placeholder="110"></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"ගණනය කරන්න":"Calculate"}</button>
+      </div>${out()}`,
+    logic: () => `
+      <h3 style="margin-bottom:16px">🚪 ${LANG==="si"?"තර්ක ද්වාර":"Logic Gates"}</h3>
+      <div class="calc-row">
+        <div class="field"><label>${LANG==="si"?"ද්වාරය":"Gate"}</label>
+        <select id="gate"><option>AND</option><option>OR</option><option>NOT</option><option>XOR</option><option>NAND</option><option>NOR</option></select></div>
+        <button class="btn cyan" id="go">${LANG==="si"?"සත්‍ය වගුව":"Show Truth Table"}</button>
+      </div>
+      <div id="ttHolder"></div>${out()}`,
+  };
+  const out = () => `<div class="calc-error" id="cerr"></div><div class="calc-result" id="cres"></div>`;
+
+  const showRes = (res, steps) => {
+    $("#cerr").classList.remove("show");
+    const r = $("#cres"); r.classList.add("show");
+    r.innerHTML = `<div class="res-main">${esc(res)}</div>${steps?`<div class="steps"><strong>${LANG==="si"?"පියවරෙන් පියවර":"Step by step"}:</strong><ol>${steps.map(s=>`<li>${esc(s)}</li>`).join("")}</ol></div>`:""}`;
+  };
+  const showErr = m => { $("#cres").classList.remove("show"); const e=$("#cerr"); e.textContent="⚠️ "+m; e.classList.add("show"); };
+  const num = id => { const v = $(id).value.trim(); if (v==="" || isNaN(Number(v))) throw new Error(LANG==="si"?"ම VALID අගයක් ඇතුළත් කරන්න":"Please enter a valid number."); return Number(v); };
+  const gcd = (a,b) => b ? gcd(b, a%b) : Math.abs(a);
+
+  const handlers = {
+    basic(){ const a=num("#a"),b=num("#b"),op=$("#op").value;
+      if(op==="/"&&b===0) return showErr(LANG==="si"?"ශූන්‍යයෙන් බෙදිය නොහැක":"Cannot divide by zero.");
+      const r = op==="+"?a+b:op==="-"?a-b:op==="*"?a*b:a/b;
+      showRes(`${a} ${op.replace("*","×").replace("/","÷")} ${b} = ${+r.toFixed(6)}`, [`${LANG==="si"?"ගණනය කිරීම":"Apply"} ${op}: ${a} ${op} ${b}`,`${LANG==="si"?"ප්‍රතිඵලය":"Result"} = ${+r.toFixed(6)}`]); },
+    percent(){ const p=num("#p"),v=num("#v"); showRes(`${p}% of ${v} = ${+(p/100*v).toFixed(6)}`,
+      [`${p}/100 × ${v}`,`= ${+(p/100).toFixed(6)} × ${v}`,`= ${+(p/100*v).toFixed(6)}`]); },
+    fraction(){ const a=num("#a"),b=num("#b"),c=num("#c"),d=num("#d");
+      if(!b||!d) return showErr(LANG==="si"?"හරය ශූන්‍ය විය නොහැක":"Denominator cannot be zero.");
+      const n=a*d+c*b, dd=b*d, g=gcd(n,dd);
+      showRes(`${a}/${b} + ${c}/${d} = ${n/gcd(n,dd)}/${dd/gcd(n,dd)}`,
+        [`Common denominator: ${b} × ${d} = ${dd}`,`${a×d}/${dd} + ${c×b}/${dd} = ${n}/${dd}`,`Simplify by GCD ${g}: ${n/g}/${dd/g}`]); },
+    ratio(){ const a=num("#a"),b=num("#b"); if(!b) return showErr(LANG==="si"?"ශූන්‍ය විය නොහැක":"Cannot be zero.");
+      const g=gcd(a,b); showRes(`${a} : ${b} = ${a/g} : ${b/g}`,[`GCD(${a}, ${b}) = ${g}`,`Divide both by ${g}: ${a/g} : ${b/g}`]); },
+    power(){ },
+    average(){ const raw=$("#vals").value.split(",").map(x=>x.trim()).filter(Boolean);
+      if(!raw.length||raw.some(x=>isNaN(Number(x)))) return showErr(LANG==="si"?"වලංගු අගයන් කොමා වලින් වෙන් කර ඇතුළත් කරන්න":"Enter valid numbers separated by commas.");
+      const vs=raw.map(Number), sum=vs.reduce((s,x)=>s+x,0);
+      showRes(`Average = ${+(sum/vs.length).toFixed(4)}`,[`Sum = ${vs.join(" + ")} = ${sum}`,`Count = ${vs.length}`,`${sum} ÷ ${vs.length} = ${+(sum/vs.length).toFixed(4)}`]); },
+    base(){ const s=$("#num").value.trim().toUpperCase(), fb=+$("#fb").value, tb=+$("#tb").value;
+      const valid="0123456789ABCDEF".slice(0,fb);
+      if(!s||[...s].some(ch=>!valid.includes(ch))) return showErr(`${s||"?"} ${LANG==="si"?"යනු පද්ධතිය":"is not a valid base"} ${fb} ${LANG==="si"?"සංඛ්‍යාවකි නොවේ":"number"}.`);
+      const dec=parseInt(s,fb); showRes(`${s}(${fb}) = ${dec.toString(tb).toUpperCase()}(${tb})`,
+        [`Convert ${s} from base ${fb} to decimal: ${dec}`,`Convert ${dec} to base ${tb}: ${dec.toString(tb).toUpperCase()}`]); },
+    binary(){ const re=/^[01]+$/; const A=$("#a").value.trim(),B=$("#b").value.trim();
+      if(!re.test(A)||!re.test(B)) return showErr(LANG==="si"?"ද්විමය අගයන් 0 සහ 1 පමණක් වලංගුයි":"Binary values may only contain 0 and 1.");
+      const a=parseInt(A,2),b=parseInt(B,2),op=$("#op").value; let r;
+      if(op==="-"&&b>a) return showErr(LANG==="si"?"ඍණ ප්‍රතිඵලය නොපෙන්වයි (මෙම කැල්කියුලේටරය නොමිලේ නොවේ — unsigned only)":"Negative result not supported for unsigned binary here.");
+      r = op==="+"?a+b:op==="-"?a-b:a*b;
+      showRes(`${A} ${op} ${B} = ${r.toString(2)}`,
+        [`${A}(2) = ${a}(10), ${B}(2) = ${b}(10)`,`${a} ${op} ${b} = ${r}(10)`,`${r}(10) = ${r.toString(2)}(2)`]); },
+    logic(){ const g=$("#gate").value, rows=g==="NOT"?[[0],[1]]:[[0,0],[0,1],[1,0],[1,1]];
+      const f = g==="NOT"?(a=>a?0:1):g==="AND"?((a,b)=>a&b):g==="OR"?((a,b)=>a|b):g==="XOR"?((a,b)=>a^b):g==="NAND"?((a,b)=>!(a&b)?1:0):((a,b)=>!(a|b)?1:0);
+      const heads = g==="NOT"?"<th>A</th>":"<th>A</th><th>B</th>";
+      $("#ttHolder").innerHTML = `<table class="truthtable"><tr>${heads}<th>Output (${g})</th></tr>
+        ${rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join("")}<td><strong>${f(...r)}</strong></td></tr>`).join("")}</table>`;
+      showRes(`${g} gate truth table generated`,[]); },
+  };
+
+  const load = tool => {
+    $$(".calc-tab").forEach(x=>x.classList.toggle("active",x.dataset.tool===tool));
+    $("#calcPanel").innerHTML = panels[tool]();
+    if(tool==="power"){
+      $("#goPow").onclick=()=>{ try{ const a=num("#a"),b=num("#b"); showRes(`${a}^${b} = ${Math.pow(a,b)}`,[`Multiply ${a} by itself ${b} time(s): ${a}^${b} = ${Math.pow(a,b)}`]); }catch(e){showErr(e.message);} };
+      $("#goRoot").onclick=()=>{ try{ const c=num("#c"); if(c<0) throw new Error(LANG==="si"?"ඍණ අගයකට වර්ගමූලයක් නොමැත (real numbers)":"Negative numbers have no real square root."); showRes(`√${c} = ${+Math.sqrt(c).toFixed(6)}`,[`√${c} ≈ ${+Math.sqrt(c).toFixed(6)}`]); }catch(e){showErr(e.message);} };
+    } else if (tool==="logic"){ $("#go").onclick=handlers.logic; }
+    else { $("#go").onclick=()=>{ try{ handlers[tool](); }catch(e){ showErr(e.message); } }; }
+  };
+  $$(".calc-tab").forEach(x=>x.addEventListener("click",()=>load(x.dataset.tool)));
+  load("basic");
+}
+
+/* ---------- QUIZZES ---------- */
+let QUIZ = null;
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+function vQuizzes(){
+  return pageHero("Practice", t("navQuizzes"), "Multiple-choice quizzes with instant feedback, explanations, scores and progress tracking.") +
+  `<section class="section"><div class="container" id="quizArea">
+    <div class="quiz-cats">
+      ${QUIZ_CATEGORIES.map(c => { const best = localStorage.getItem("kp-best-"+c.id); return `
+        <div class="quiz-card">
+          <span class="qcount">${c.questions.length} ${LANG==="si"?"ප්‍රශ්න":"questions"}${best?` • ${LANG==="si"?"හොඳම":"Best"}: ${best}%`:""}</span>
+          <h3>${esc(LANG==="si"?c.siName:c.name)}</h3>
+          <p>${esc(c.desc)}</p>
+          <button class="btn cyan sm" data-cat="${c.id}">${esc(t("startQuiz"))}</button>
+        </div>`; }).join("")}
+    </div>
+    <p class="muted small">ℹ️ ${LANG==="si"
+      ?"ප්‍රශ්න මෙම ගොනුවේම ගබඩා වේ. සැබෑ දෛනික කාලසටහනක් සහ උපකරණ හරහා ප්‍රගතිය සඳහා backend එකක් අවශ්‍යයි (README බලන්න)."
+      :"Questions are stored locally in JavaScript. A real daily schedule and cross-device progress tracking require a backend (see README)."}</p>
+  </div></section>`;
+}
+
+function bindQuizzes(){
+  $$("#quizArea [data-cat]").forEach(b => b.addEventListener("click", () => startQuiz(b.dataset.cat)));
+}
+
+function startQuiz(catId){
+  const cat = QUIZ_CATEGORIES.find(c=>c.id===catId);
+  QUIZ = { cat, qs: shuffle([...cat.questions]), i:0, score:0, picked:[] };
+  renderQ();
+}
+function renderQ(){
+  const { cat, qs, i } = QUIZ, q = qs[i];
+  $("#quizArea").innerHTML = `
+    <div class="quiz-shell">
+      <h3 style="color:var(--navy);margin-bottom:16px">${esc(LANG==="si"?cat.siName:cat.name)}</h3>
+      <div class="quiz-progress"><div style="width:${(i/qs.length)*100}%"></div></div>
+      <div class="quiz-meta"><span>${LANG==="si"?"ප්‍රශ්නය":"Question"} ${i+1} / ${qs.length}</span><span>${LANG==="si"?"ලකුණු":"Score"}: ${QUIZ.score}</span></div>
+      <div class="quiz-q">${esc(q.q)}</div>
+      <div class="quiz-opts">
+        ${q.opts.map((o,k)=>`<button class="quiz-opt" data-k="${k}"><span class="opt-letter">${"ABCD"[k]}</span>${esc(o)}</button>`).join("")}
+      </div>
+      <div class="quiz-feedback" id="qFb"></div>
+      <div class="quiz-next"><button class="btn cyan" id="qNext" style="display:none">${i===qs.length-1?(LANG==="si"?"ප්‍රතිඵල බලන්න":"See Results"):(LANG==="si"?"ඊළඟට":"Next →")}</button></div>
+    </div>`;
+  $$("#quizArea .quiz-opt").forEach(b => b.addEventListener("click", () => answerQ(+b.dataset.k)));
+  $("#qNext").addEventListener("click", () => { QUIZ.i++; QUIZ.i < QUIZ.qs.length ? renderQ() : renderResults(); });
+}
+function answerQ(k){
+  const { qs, i } = QUIZ, q = qs[i], ok = k === q.answer;
+  if (ok) QUIZ.score++;
+  QUIZ.picked.push(k);
+  $$("#quizArea .quiz-opt").forEach(b => { b.disabled = true; if (+b.dataset.k === q.answer) b.classList.add("correct"); });
+  if (!ok) $$("#quizArea .quiz-opt")[k].classList.add("wrong");
+  const fb = $("#qFb"); fb.className = "quiz-feedback show " + (ok?"ok":"bad");
+  fb.textContent = (ok?"✅ Correct! ":"❌ Incorrect. ") + "✔ " + q.opts[q.answer] + " — " + q.explain;
+  $("#qNext").style.display = "inline-flex";
+}
+function renderResults(){
+  const { cat, qs, score, picked } = QUIZ, pct = Math.round(score/qs.length*100);
+  const prev = +(localStorage.getItem("kp-best-"+cat.id) || 0);
+  if (pct > prev) localStorage.setItem("kp-best-"+cat.id, pct);
+  $("#quizArea").innerHTML = `
+    <div class="quiz-shell quiz-result">
+      <h3 style="color:var(--navy)">${LANG==="si"?"ප්‍රතිඵල":"Results"} — ${esc(LANG==="si"?cat.siName:cat.name)}</h3>
+      <div class="score-ring" style="--pct:${pct}"><div>${pct}%<small>${score}/${qs.length}</small></div></div>
+      <p class="muted">${pct>=80?"🏆 Outstanding! Exam-ready.":pct>=50?"👍 Good — review the explanations below.":"📖 Keep practicing — retake this quiz tomorrow."}</p>
+      <div class="quiz-review">
+        ${qs.map((q,idx)=>{ const good = picked[idx]===q.answer; return `
+          <div class="quiz-review-item ${good?"good":"bad"}">
+            <div class="rr-q">${idx+1}. ${esc(q.q)}</div>
+            <div>${LANG==="si"?"ඔබේ පිළිතුර":"Your answer"}: ${esc(q.opts[picked[idx]])} ${good?"✅":"❌ (${LANG==="si"?"නිවැරදි":"correct"}: ${esc(q.opts[q.answer])})"}</div>
+            <div class="muted small">💡 ${esc(q.explain)}</div>
+          </div>`; }).join("")}
+      </div>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="btn cyan" id="qRestart">🔄 ${LANG==="si"?"නැවත අරඹන්න":"Restart Quiz"}</button>
+        <a class="btn ghost" href="#/daily-quizzes">${LANG==="si"?"වෙනත් කුයිස්":"All Quizzes"}</a>
+      </div>
+    </div>`;
+  $("#qRestart").addEventListener("click", () => startQuiz(cat.id));
+}
+
+/* ---------- STUDY NOTES ---------- */
+function vNotes(){
+  return pageHero("Resources", t("navNotes"), "Short notes, revision guides, key terms, tutorials, exam tips and FAQs.") +
+  `<section class="section"><div class="container">
+    <div class="toolbar"><div class="field"><label>${LANG==="si"?"සටහන් සොයන්න":"Search notes"}</label>
+      <input type="text" id="noteSearch" placeholder="e.g. RAM, revision"></div></div>
+    <div id="notesList"></div>
+    <div class="section-head" style="margin-top:48px"><span class="kicker">FAQ</span><h2>${LANG==="si"?"නිතර අසන ප්‍රශ්න":"Frequently Asked Questions"}</h2></div>
+    ${FAQS.map(f=>`<details class="faq"><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("")}
+  </div></section>`;
+}
+function bindNotes(){
+  const upd = () => {
+    const q = $("#noteSearch").value.trim().toLowerCase();
+    const res = STUDY_NOTES.filter(n => !q || (n.title+n.body+n.tag+n.si).toLowerCase().includes(q));
+    $("#notesList").innerHTML = res.length ? res.map(n => `
+      <div class="note-card"><span class="note-tag">${esc(n.tag)}</span>
+        <h3>${esc(n.title)}</h3><p>${esc(n.body)}</p><p class="note-si">${esc(n.si)}</p>
+      </div>`).join("") : `<div class="empty-state"><div class="big">🔍</div>${esc(t("noResults"))}</div>`;
+  };
+  $("#noteSearch").addEventListener("input", upd); upd();
+}
+
+/* ---------- ABOUT / CONTACT / PRIVACY ---------- */
+function vAbout(){
+  return pageHero("About", t("navAbout"), "One teacher's mission: world-class ICT education, free for every Sri Lankan student.") +
+  `<section class="section"><div class="container" style="max-width:840px">
+    <h3 style="color:var(--navy);margin-bottom:10px">Who is Kevin Premalal?</h3>
+    <p style="margin-bottom:14px">Kevin Premalal is an ICT educator dedicated to helping Sri Lankan students master Information & Communication Technology — from their first O/L lesson to advanced A/L concepts. This website gathers everything students asked for in one place: past papers, structured lessons, hardware diagrams, calculators and daily quizzes.</p>
+    <h3 style="color:var(--navy);margin-bottom:10px">Our principles</h3>
+    <ul style="margin-left:20px;margin-bottom:14px">
+      <li><strong>100% free</strong> — education should never be paywalled.</li>
+      <li><strong>Honest</strong> — no fake statistics, no broken links, no fake download buttons. Sample entries are clearly labelled.</li>
+      <li><strong>Bilingual</strong> — learn in English or සිංහල, whichever helps you understand.</li>
+      <li><strong>Original content</strong> — lessons, questions and diagrams are written from scratch.</li>
+    </ul>
+    <h3 style="color:var(--navy);margin-bottom:10px">What's inside</h3>
+    <p class="muted">12 ICT lessons • 12 interactive computer-part diagrams • 9 maths tools with steps • 50 quiz questions across 5 categories • study notes & FAQs • a growing past-paper library.</p>
+  </div></section>`;
+}
+
+function vContact(){
+  return pageHero("Contact", t("navContact"), "Questions, paper requests or feedback — we read every message.") +
+  `<section class="section"><div class="container"><div class="contact-grid">
+    <div>
+      <h3 style="color:var(--navy);margin-bottom:12px">Send a message</h3>
+      <form id="contactForm" novalidate>
+        <div class="field" style="margin-bottom:12px"><label>${LANG==="si"?"නම":"Name"}</label><input type="text" id="cName"></div>
+        <div class="field" style="margin-bottom:12px"><label>Email</label><input type="email" id="cEmail"></div>
+        <div class="field" style="margin-bottom:12px"><label>${LANG==="si"?"පණිවිඩය":"Message"}</label><textarea id="cMsg"></textarea></div>
+        <button class="btn cyan" type="submit">${LANG==="si"?"යවන්න":"Send"}</button>
+        <div class="form-status" id="cStatus"></div>
+        <p class="muted small" style="margin-top:12px">ℹ️ This static prototype opens your email app (no server). With a backend, messages store directly — see README.</p>
+      </form>
+    </div>
+    <div>
+      <h3 style="color:var(--navy);margin-bottom:12px">Other ways to reach us</h3>
+      <div class="note-card"><span class="note-tag">Email</span><h3>hello@kevinpremalal.lk</h3><p>${LANG==="si"?"ප්‍රශ්න පත්‍ර ඉල්ලීම් සහ සම්බන්ධතා සඳහා":"Paper requests and general contact"}</p></div>
+      <div class="note-card"><span class="note-tag">${LANG==="si"?"ප්‍රතිචාරය":"Feedback"}</span><h3>${LANG==="si"?"වැරදි හොයන්න!":"Found a bug?"}</h3><p>${LANG==="si"?"ක්විස් පිළිතුරක් වැරදි නම් හෝ බොත්තමක් වැඩ නොකරනවා නම් කියන්න.":"Tell us if a quiz answer is wrong or a button misbehaves — we fix fast."}</p></div>
+    </div>
+  </div></div></section>`;
+}
+function bindContact(){
+  $("#contactForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const n=$("#cName").value.trim(), em=$("#cEmail").value.trim(), m=$("#cMsg").value.trim(), st=$("#cStatus");
+    const bad = msg => { st.className="form-status show bad"; st.textContent="⚠️ "+msg; };
+    if (n.length < 2) return bad(LANG==="si"?"කරුණාකර ඔබේ නම ඇතුළත් කරන්න":"Please enter your name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return bad(LANG==="si"?"වලංගු ඊමේල් ලිපිනයක් ඇතුළත් කරන්න":"Please enter a valid email address.");
+    if (m.length < 10) return bad(LANG==="si"?"පණිවිඩය අක්ෂර 10කට වැඩි විය යුතුය":"Message must be at least 10 characters.");
+    st.className="form-status show ok";
+    st.textContent = "✅ " + (LANG==="si"?"ඔබගේ email යෙදුම විවෘත වේ…":"Opening your email app…");
+    location.href = `mailto:hello@kevinpremalal.lk?subject=${encodeURIComponent("Website message from "+n)}&body=${encodeURIComponent(m+"\n\n— "+n+" ("+em+")")}`;
+  });
+}
+
+function vPrivacy(){
+  return pageHero("Legal", t("navPrivacy"), "Last updated: 2025. Simple, honest, student-first.") +
+  `<section class="section"><div class="container" style="max-width:840px">
+    <h3 style="color:var(--navy);margin-bottom:8px">1. Data we collect</h3>
+    <p class="muted" style="margin-bottom:14px">Almost nothing. This prototype stores your language choice and quiz best-scores in your own browser's localStorage. Nothing is sent to any server.</p>
+    <h3 style="color:var(--navy);margin-bottom:8px">2. Cookies & analytics</h3>
+    <p class="muted" style="margin-bottom:14px">We do not use tracking cookies or third-party analytics in this prototype.</p>
+    <h3 style="color:var(--navy);margin-bottom:8px">3. Contact form</h3>
+    <p class="muted" style="margin-bottom:14px">The contact form opens your own email application. Your message travels only to us.</p>
+    <h3 style="color:var(--navy);margin-bottom:8px">4. Copyright</h3>
+    <p class="muted" style="margin-bottom:14px">All lessons, notes, questions and diagrams are original works of Kevin Premalal, shared free for personal educational use. Past papers remain the property of the Department of Examinations, Sri Lanka, and are shared solely for student revision.</p>
+    <h3 style="color:var(--navy);margin-bottom:8px">5. Changes</h3>
+    <p class="muted">If this policy changes, the updated date above will change too. Questions? Use the Contact page.</p>
+  </div></section>`;
+}
+
+/* ---------- SEARCH ---------- */
+function searchIndex(){
+  const ix = [];
+  ICT_LESSONS.forEach(l => ix.push({ type:"Lesson", title:l.title, sub:l.siTitle, route:"#/lesson/"+l.id }));
+  PAST_PAPERS.forEach(p => ix.push({ type:"Paper", title:p.title, sub:p.subject+" "+p.year, route:"#/past-papers" }));
+  COMPUTER_PARTS.forEach(p => ix.push({ type:"Part", title:p.name, sub:p.siName, route:"#/computer-parts" }));
+  STUDY_NOTES.forEach(n => ix.push({ type:"Note", title:n.title, sub:n.tag, route:"#/study-notes" }));
+  return ix;
+}
+function vSearch(q){
+  const query = (q||"").toLowerCase();
+  const res = searchIndex().filter(x => !query || (x.title+" "+x.sub+" "+x.type).toLowerCase().includes(query));
+  return pageHero("Search", `🔍 "${esc(q||"")}"`, `${res.length} ${LANG==="si"?"ප්‍රතිඵල":"results"}`) +
+  `<section class="section"><div class="container" style="max-width:760px">
+    ${res.length ? res.map(r => `<a class="note-card" style="display:block" href="${r.route}">
+        <span class="note-tag">${esc(r.type)}</span><h3>${esc(r.title)}</h3><p class="muted">${esc(r.sub)}</p></a>`).join("")
+      : `<div class="empty-state"><div class="big">🔍</div>${esc(t("noResults"))}</div>`}
+  </div></section>`;
+}
+
+/* ---------- HOME binding ---------- */
+function bindHome(){
+  const inp = $("#heroSearch"), sug = $("#searchSuggest");
+  inp.addEventListener("input", () => {
+    const q = inp.value.trim().toLowerCase();
+    if (q.length < 2) { sug.classList.remove("show"); return; }
+    const res = searchIndex().filter(x => (x.title+" "+x.sub).toLowerCase().includes(q)).slice(0,6);
+    sug.innerHTML = res.length ? res.map(r => `<a href="${r.route}"><span class="tag">${esc(r.type)}</span>${esc(r.title)}</a>`).join("")
+      : `<a href="#/search/${encodeURIComponent(inp.value.trim())}">${esc(t("noResults"))}</a>`;
+    sug.classList.add("show");
+  });
+  document.addEventListener("click", e => { if (!e.target.closest(".search-wrap")) sug.classList.remove("show"); });
+  const go = () => { const v = inp.value.trim(); if (v) location.hash = "#/search/" + encodeURIComponent(v); };
+  $("#heroSearchBtn").addEventListener("click", go);
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  // Daily question interactivity
+  const dq = dailyQuestion();
+  $$("#dailyOpts .quiz-opt").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.i, ok = i === dq.answer, fb = $("#dailyFb");
+    $$("#dailyOpts .quiz-opt").forEach(x => { x.disabled = true; if (+x.dataset.i === dq.answer) x.classList.add("correct"); });
+    if (!ok) b.classList.add("wrong");
+    fb.className = "quiz-feedback show " + (ok ? "ok" : "bad");
+    fb.textContent = (ok ? "✅ Correct! " : "❌ Not quite. ") + dq.explain;
+  }));
+}
+
+/* ---------- BINDERS + INIT ---------- */
+const BINDERS = {
+  "home": bindHome, "past-papers": bindPastPapers, "lesson": bindLesson,
+  "computer-parts": bindParts, "maths-calculator": bindMaths,
+  "daily-quizzes": bindQuizzes, "study-notes": bindNotes, "contact": bindContact,
+};
+
+$("#langToggle").addEventListener("click", () => {
+  LANG = OTHER_LANG();
+  localStorage.setItem("kp-lang", LANG);
+  $("#langToggle").textContent = LANG === "en" ? "සිංහල" : "English";
+  applyI18n(); render();
+});
+$("#langToggle").textContent = LANG === "en" ? "සිංහල" : "English";
+
+$("#navBurger").addEventListener("click", () => {
+  const m = $("#mobileMenu"), open = m.classList.toggle("open");
+  $("#navBurger").classList.toggle("open", open);
+  $("#navBurger").setAttribute("aria-expanded", open);
+});
+
+applyI18n();
+render();
